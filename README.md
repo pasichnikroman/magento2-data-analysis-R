@@ -23,7 +23,7 @@ cd magento2-data-analysis-R
 Once the repository is cloned, you can run RStudio Server inside a Docker container. Run the following command:
 
 ```bash
-docker run --net="host" --name rstudio_server -d -v $PWD:/home/rstudio -e PASSWORD=password -t rocker/rstudio
+docker run --net="host" --name rstudio_server -d -v $PWD:/home/rstudio -e PASSWORD=password -t rheartpython/swashbuckling-r
 ```
 
 This command will:

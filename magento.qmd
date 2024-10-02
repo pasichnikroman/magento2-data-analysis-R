@@ -19,14 +19,22 @@ We will use the `DBI` and `RMySQL` packages to connect to the MySQL database.
 
 #Install required packages (if not already installed) 
 if (!require(DBI)) install.packages("DBI")
-if (!require(RMySQL)) install.packages("RMySQL") 
+if (!require(RMySQL)) install.packages("RMySQL")
 if (!require(dplyr)) install.packages("dplyr")
-if (!require(ggplot2)) install.packages("ggplot2") 
-if (!require(lubridate)) install.packages("lubridate") 
-if (!require(ggmap)) install.packages("ggmap") 
-if (!require(leaflet)) install.packages("leaflet") 
+if (!require(ggplot2)) install.packages("ggplot2")
+if (!require(lubridate)) install.packages("lubridate")
+if (!require(ggmap)) install.packages("ggmap")
+if (!require(leaflet)) install.packages("leaflet")
 
 # Load required libraries
+# Load all required libraries
+library(DBI)
+library(RMySQL)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(ggmap)
+library(leaflet)
 ```
 
 ### MySql connect
@@ -55,7 +63,7 @@ if (dbIsValid(con)) {
   print("Failed to connect to the database.")
 }
 ```
-
+### Sales Data Overview
 ```{r message=FALSE, warning=FALSE}
 
 # Query to fetch sales data from Magento's sales_order and sales_order_item tables
@@ -293,7 +301,7 @@ customer_locations <- dbGetQuery(con, query)
 
 
 #put your api key 
-google_api_key <- "chang_on_your_google_api_key"
+google_api_key <- "add_your_api_key_here"
 # 4. Geocode customer addresses using Google Maps API
 register_google(key = google_api_key)  # Replace with your Google API key
 
