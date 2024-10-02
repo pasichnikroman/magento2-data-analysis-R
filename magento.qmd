@@ -1,0 +1,326 @@
+---
+title: "Magento Analysis"
+author: "Roman Pasichnyk"
+format: html
+editor: visual
+  markdown: 
+    wrap: 72
+---
+
+## Introduction
+
+In this analysis, we will connect to a MySQL Magento database, extract sales, customer data, and perform basic analysis to identify trends and patterns.
+
+### Setup
+
+We will use the `DBI` and `RMySQL` packages to connect to the MySQL database.
+
+```{r message=FALSE, warning=FALSE}
+
+#Install required packages (if not already installed) 
+if (!require(DBI)) install.packages("DBI")
+if (!require(RMySQL)) install.packages("RMySQL") 
+if (!require(dplyr)) install.packages("dplyr")
+if (!require(ggplot2)) install.packages("ggplot2") 
+if (!require(lubridate)) install.packages("lubridate") 
+if (!require(ggmap)) install.packages("ggmap") 
+if (!require(leaflet)) install.packages("leaflet") 
+
+# Load required libraries
+```
+
+### MySql connect
+
+```{r message=FALSE, warning=FALSE}
+
+# Database connection details
+db_host <- "db_host"
+db_user <- "db_user"
+db_password <- "db_password"
+db_name <- "db_name"
+
+# Connect to MySQL Magento database
+con <- dbConnect(
+  RMySQL::MySQL(),
+  dbname = db_name,
+  host = db_host,
+  user = db_user,
+  password = db_password
+)
+
+# Check connection
+if (dbIsValid(con)) {
+  print("Successfully connected to the Magento database!")
+} else {
+  print("Failed to connect to the database.")
+}
+```
+
+```{r message=FALSE, warning=FALSE}
+
+# Query to fetch sales data from Magento's sales_order and sales_order_item tables
+query <- "
+SELECT so.entity_id AS order_id,
+       so.created_at AS order_date,
+       soi.product_id,
+       soi.qty_ordered,
+       soi.row_total AS product_total,
+       so.grand_total AS order_total
+FROM sales_order so
+JOIN sales_order_item soi ON so.entity_id = soi.order_id
+WHERE so.state = 'complete'
+"
+
+# Execute the query and fetch the sales data
+sales_data <- dbGetQuery(con, query)
+
+# Preview the sales data
+head(sales_data)
+# Convert order_date to Date format
+sales_data$order_date <- as.Date(sales_data$order_date)
+
+# Summarize total sales and number of products sold
+total_sales <- sum(sales_data$order_total, na.rm = TRUE)
+total_products_sold <- sum(sales_data$qty_ordered, na.rm = TRUE)
+
+# Print the summary
+cat("Total Sales: $", total_sales, "\n")
+cat("Total Products Sold:", total_products_sold, "\n")
+
+# Group by date and calculate daily sales
+daily_sales <- sales_data %>%
+  group_by(order_date) %>%
+  summarize(daily_total_sales = sum(order_total, na.rm = TRUE))
+
+# Plot sales trend over time
+ggplot(daily_sales, aes(x = order_date, y = daily_total_sales)) +
+  geom_line(color = "blue") +
+  labs(title = "Daily Sales Trend",
+       x = "Date",
+       y = "Total Sales") +
+  theme_minimal()
+
+```
+
+### Most Popular Time for Orders:
+
+```{r message=FALSE, warning=FALSE}
+# 1. selelct
+query <- "
+SELECT orders.entity_id AS order_id,
+       orders.created_at AS order_date,
+       orders.grand_total AS order_total
+FROM sales_order AS orders;
+"
+
+# Fetch the data from the database
+df <- dbGetQuery(con, query)
+
+
+# Convert 'order_date' to datetime format and extract the hour of the order
+df$order_date <- as.POSIXct(df$order_date, format = "%Y-%m-%d %H:%M:%S")
+df$hour <- hour(df$order_date)  # Extract hour of the day
+
+# Summarize the data: Total orders by hour
+sales_by_hour <- df %>%
+  group_by(hour) %>%
+  summarize(total_orders = n(),
+            total_sales = sum(order_total, na.rm = TRUE))
+
+# Visualize the most popular time for orders (by number of orders)
+ggplot(sales_by_hour, aes(x = hour, y = total_orders)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Most Popular Time for Orders",
+       x = "Hour of the Day",
+       y = "Total Number of Orders") +
+  scale_x_continuous(breaks = 0:23) +  # Show all hours from 0 to 23
+  theme_minimal()
+
+#  Optional: Visualize by sales instead of number of orders
+ggplot(sales_by_hour, aes(x = hour, y = total_sales)) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  labs(title = "Most Popular Time for Sales",
+       x = "Hour of the Day",
+       y = "Total Sales (in $)") +
+  scale_x_continuous(breaks = 0:23) +  # Show all hours from 0 to 23
+  theme_minimal()
+```
+
+### Sales by Product Category
+
+```{r message=FALSE, warning=FALSE}
+
+query_category_sales <- "
+SELECT ccev.value AS category_name,
+       SUM(so.grand_total) AS total_sales
+FROM sales_order AS so
+JOIN sales_order_item AS soi ON so.entity_id = soi.order_id
+JOIN catalog_category_product AS ccp ON soi.product_id = ccp.product_id
+JOIN catalog_category_entity AS cce ON ccp.category_id = cce.entity_id
+JOIN catalog_category_entity_varchar AS ccev ON cce.entity_id = ccev.entity_id
+WHERE ccev.attribute_id = (SELECT attribute_id 
+                           FROM eav_attribute 
+                           WHERE attribute_code = 'name' 
+                           AND entity_type_id = 3)  -- 3 is the entity_type_id for categories
+AND ccev.store_id = 0  -- Assuming you want the default store view
+GROUP BY ccev.value
+ORDER BY total_sales DESC
+LIMIT 50;  -- Limit to top 50 categories
+"
+
+# Fetch sales by product category from the database
+category_sales <- dbGetQuery(con, query_category_sales)
+
+
+# 4. Create a bar plot for sales by product category
+category_sales_plot <- ggplot(category_sales, aes(x = reorder(category_name, -total_sales), y = total_sales)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Sales by Product Category (Top 50)", x = "Product Category", y = "Total Sales") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Print the plot
+print(category_sales_plot)
+```
+
+## Sales Trands
+
+```{r message=FALSE, warning=FALSE}
+# 2. Query to get product sales trends
+# 2. Query to get product sales trends with IDs, SKUs, and names
+query_product_trends <- "
+SELECT DATE(so.created_at) AS order_date,
+       soi.product_id,
+       cpe.sku,
+       cpev.value AS product_name,
+       SUM(soi.qty_ordered) AS total_quantity,
+       SUM(so.grand_total) AS total_sales
+FROM sales_order AS so
+JOIN sales_order_item AS soi ON so.entity_id = soi.order_id
+JOIN catalog_product_entity AS cpe ON soi.product_id = cpe.entity_id
+JOIN catalog_product_entity_varchar AS cpev ON cpe.entity_id = cpev.entity_id
+WHERE cpev.attribute_id = (SELECT attribute_id 
+                           FROM eav_attribute 
+                           WHERE attribute_code = 'name' 
+                           AND entity_type_id = 4)  -- 4 is the entity_type_id for products
+AND cpev.store_id = 0  -- Assuming you want the default store view
+GROUP BY order_date, soi.product_id, cpe.sku, cpev.value
+ORDER BY order_date, soi.product_id;
+"
+
+# Fetch product sales trends from the database
+product_trends <- dbGetQuery(con, query_product_trends)
+
+
+# 4. Convert order_date to Date type
+product_trends$order_date <- as.Date(product_trends$order_date)
+
+# 5. Create a line plot for product sales trends (for example, for top 5 products)
+top_products <- product_trends %>%
+  group_by(product_id) %>%
+  summarise(total_sales = sum(total_sales)) %>%
+  top_n(5, total_sales) %>%
+  pull(product_id)
+
+# Filter the product trends data for the top products
+top_product_trends <- product_trends %>%
+  filter(product_id %in% top_products)
+
+# Create a line plot for the top products
+product_trends_plot <- ggplot(top_product_trends, aes(x = order_date, y = total_sales, color = factor(product_id))) +
+  geom_line() +
+  labs(title = "Product Sales Trends for Top 5 Products", x = "Order Date", y = "Total Sales", color = "Product ID") +
+  theme_minimal()
+
+# Print the plot
+print(product_trends_plot)
+
+# Display product IDs, SKUs, and Names for the top products
+top_product_details <- product_trends %>%
+  filter(product_id %in% top_products) %>%
+  select(product_id, sku, product_name) %>%
+  distinct()
+
+print(top_product_details)
+
+```
+
+### Customer Segmentation
+
+```{r message=FALSE, warning=FALSE}
+# Query to get customer order data
+query_customers <- "
+SELECT customer_id, SUM(grand_total) AS total_spent, COUNT(entity_id) AS order_count
+FROM sales_order
+GROUP BY customer_id;
+"
+
+# Fetch customer spending data
+customer_data <- dbGetQuery(con, query_customers)
+
+# Segment customers based on total spending
+customer_segments <- customer_data %>%
+  mutate(segment = case_when(
+    total_spent < 100 ~ "Low Value",
+    total_spent < 500 ~ "Medium Value",
+    TRUE ~ "High Value"
+  ))
+
+# Print segmented customer data
+print(customer_segments)
+
+```
+
+### Visualize customer locations on the map,limit 200
+
+```{r message=FALSE, warning=FALSE}
+
+query <- "
+SELECT address.entity_id AS address_id,
+       customer_entity.email AS customer_email,
+       address.street AS street,
+       address.city AS city,
+       region.default_name AS region,
+       address.postcode AS postcode,
+       country.iso2_code AS country_code
+FROM customer_address_entity AS address
+JOIN customer_entity ON address.parent_id = customer_entity.entity_id
+JOIN directory_country_region AS region ON address.region_id = region.region_id
+JOIN directory_country AS country ON address.country_id = country.country_id LIMIT 200;"
+
+# Fetch the data from the database
+customer_locations <- dbGetQuery(con, query)
+
+
+#put your api key 
+google_api_key <- "chang_on_your_google_api_key"
+# 4. Geocode customer addresses using Google Maps API
+register_google(key = google_api_key)  # Replace with your Google API key
+
+# Create a full address column
+customer_locations$full_address <- paste(customer_locations$street,
+                                         customer_locations$city,
+                                         customer_locations$region,
+                                         customer_locations$country_code,
+                                         sep = ", ")
+
+# Geocode addresses to get lat/long
+customer_locations <- customer_locations %>%
+  mutate_geocode(full_address)
+
+# 5. Visualize customer locations on an interactive map using leaflet
+leaflet(customer_locations) %>%
+  addTiles() %>%  # Default OpenStreetMap tiles
+  addCircleMarkers(~lon, ~lat, radius = 3, popup = ~customer_email,
+                   color = "blue", stroke = FALSE, fillOpacity = 0.7) %>%
+  setView(lng = mean(customer_locations$lon), lat = mean(customer_locations$lat), zoom = 4)
+
+```
+
+# Close the connection to the database
+
+```{r message=FALSE, warning=FALSE}
+
+dbDisconnect(con)
+
+```
